@@ -1,6 +1,6 @@
 // 게임즈 가든 빌드: src/app.html + src/photos → index.html
 // 사진·데이터·스크립트·폰트는 비밀번호로 암호화(AES-GCM, PBKDF2)해서 넣는다. 공개 저장소에서도 비밀번호 없이는 내용을 볼 수 없다.
-// 사용법: GG_PASSWORD=비밀번호 node build.mjs
+// 사용법: GG_PASSWORD=비밀번호 node build.mjs  (Supabase 주소·공개키·토큰은 src/secrets.json, 저장소 제외)
 import fs from 'fs';
 import { webcrypto as crypto } from 'crypto';
 
@@ -13,6 +13,11 @@ let html = fs.readFileSync('src/app.html', 'utf8');
 const photos = fs.readdirSync('src/photos').filter(f => f.endsWith('.jpg'))
   .map(f => `${f.slice(0, -4)}:"data:image/jpeg;base64,${fs.readFileSync('src/photos/' + f).toString('base64')}"`).join(',');
 html = html.replace('/*__IMGS__*/', photos).replace('/*__FONTS__*/', '');
+let SEC = {}; try { SEC = JSON.parse(fs.readFileSync('src/secrets.json', 'utf8')); } catch {}
+const SB_URL = process.env.GG_SB_URL || SEC.sbUrl || '', SB_KEY = process.env.GG_SB_KEY || SEC.sbKey || '', SB_TOKEN = process.env.GG_SB_TOKEN || SEC.sbToken || '';
+if (SB_TOKEN) fs.writeFileSync('src/schema.filled.sql', fs.readFileSync('supabase/schema.sql', 'utf8').replaceAll('__GG_TOKEN__', SB_TOKEN));
+html = html.replace('/*__SB_URL__*/', SB_URL.replace(/\/+$/, '')).replace('/*__SB_KEY__*/', SB_KEY).replace('/*__SB_TOKEN__*/', SB_TOKEN);
+console.log(SB_URL && SB_KEY ? 'Supabase 연결: ' + SB_URL : 'Supabase 미설정 — 기록은 각 기기에만 저장돼요');
 
 // 앱 스크립트를 떼어내 암호화 대상에 넣는다
 const s = html.indexOf('<script>'), e = html.indexOf('</script>', s);
