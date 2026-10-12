@@ -15,12 +15,13 @@ const enc = new TextEncoder();
 
 // ── 비밀 설정 (저장소 제외) ──
 let SEC = {}; try { SEC = JSON.parse(fs.readFileSync('src/secrets.json', 'utf8')); } catch {}
+if (!SEC.masterToken) { SEC.masterToken = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('base64url'); fs.writeFileSync('src/secrets.json', JSON.stringify(SEC, null, 2)); }
 if (!SEC.appKey) { SEC.appKey = b64(crypto.getRandomValues(new Uint8Array(32))); fs.writeFileSync('src/secrets.json', JSON.stringify(SEC, null, 2)); console.log('화면 열쇠를 새로 만들었어요 (src/secrets.json)'); }
 const MASTER_ID = (process.env.GG_MASTER_ID || SEC.masterId || 'jamie').trim().toLowerCase(); // 총괄 관리자 로그인 이메일(로그인 창에 jamie 만 써도 됨)
 const MASTER_NAME = process.env.GG_MASTER_NAME || SEC.masterName || '총괄 관리자';
 const SB_URL = (process.env.GG_SB_URL || SEC.sbUrl || '').replace(/\/+$/, ''), SB_KEY = process.env.GG_SB_KEY || SEC.sbKey || '', SB_TOKEN = process.env.GG_SB_TOKEN || SEC.sbToken || '';
-if (SB_TOKEN) for (const n of ['schema', 'storage', 'accounts'])
-  fs.writeFileSync(`src/${n}.filled.sql`, fs.readFileSync(`supabase/${n}.sql`, 'utf8').replaceAll('__GG_TOKEN__', SB_TOKEN));
+if (SB_TOKEN) for (const n of ['schema', 'storage', 'accounts', 'delete'])
+  fs.writeFileSync(`src/${n}.filled.sql`, fs.readFileSync(`supabase/${n}.sql`, 'utf8').replaceAll('__GG_TOKEN__', SB_TOKEN).replaceAll('__GG_MASTER__', SEC.masterToken));
 
 // ── 앱 조립 ──
 let html = fs.readFileSync('src/app.html', 'utf8');
@@ -49,7 +50,7 @@ const idh = Buffer.from(await crypto.subtle.digest('SHA-256', enc.encode('gg:' +
 const salt = crypto.getRandomValues(new Uint8Array(16));
 const pwBase = await crypto.subtle.importKey('raw', enc.encode(PASSWORD), 'PBKDF2', false, ['deriveKey']);
 const pwKey = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: ITER, hash: 'SHA-256' }, pwBase, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
-const blob = await seal(pwKey, JSON.stringify({ k: SEC.appKey, id: MASTER_ID, name: MASTER_NAME, role: 'leader' }));
+const blob = await seal(pwKey, JSON.stringify({ k: SEC.appKey, id: MASTER_ID, name: MASTER_NAME, role: 'leader', mt: SEC.masterToken }));
 const master = { idh, salt: b64(salt), iter: ITER, iv: blob.iv, blob: blob.ct }; // 이메일·이름은 넣지 않는다(공개 페이지)
 
 const titleEnd = html.indexOf('</title>') + 8;
@@ -104,7 +105,7 @@ async function open(sess){
   const k=await crypto.subtle.importKey("raw",u8(sess.k),"AES-GCM",false,["decrypt"]);
   const {css,js}=JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:u8(D.iv)},k,u8(D.ct))));
   window.GG_USER={id:sess.id,name:sess.name,role:sess.role,idh:sess.idh};
-  window.GG_KRAW=sess.k; window.GG_MASTER={idh:M.idh};
+  window.GG_KRAW=sess.k; window.GG_MT=sess.mt||""; window.GG_MASTER={idh:M.idh};
   const st=document.createElement("style"); st.textContent=css; document.head.appendChild(st);
   document.body.classList.remove("locked"); document.getElementById("gate").remove();
   const sc=document.createElement("script"); sc.textContent=js; document.body.appendChild(sc);
@@ -120,7 +121,7 @@ document.getElementById("gate-form").addEventListener("submit",async ev=>{
     const idh=id==="jamie" ? M.idh : await hex("gg:"+id), slot=await slotFor(idh);
     if(!slot) throw new Error("no");
     const x=await unlock(slot,pw);
-    const sess={k:x.k,id:x.id,name:x.name,role:x.role,idh};
+    const sess={k:x.k,id:x.id,name:x.name,role:x.role,idh,mt:x.mt||""};
     if(document.getElementById("gate-keep").checked){ try{ localStorage.setItem(S,JSON.stringify(sess)); }catch(e){} }
     await open(sess);
   }catch(e){ err.textContent="이메일 또는 비밀번호가 맞지 않아요."; btn.disabled=false; btn.textContent="로그인"; }
