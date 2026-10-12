@@ -14,15 +14,16 @@ GG_PASSWORD=비밀번호 node build.mjs
 ```
 
 - 원본 `src/app.html`, 사진 `src/photos/`는 담당 PC에만 보관합니다(저장소 제외).
-## 링크
+## 로그인 · 역할
 
-- 담당자: `/games-garden/` — 리더가 확인한 기록만 보여요
-- 가드너: `/games-garden/#crew` — 바로 기록 화면이 열려요
-- 리더: `/games-garden/#leader` — 확인 전 기록 + "확인 완료" 버튼
+- 이메일 + 비밀번호로 로그인. 총괄 관리자(jamie)가 **관리자 설정**에서 계정을 만들고 역할을 줘요.
+- 리더: 확인 전 기록 + 확인 완료 / 담당자: 확인된 기록만 / 가드너: 로그인하면 기록 화면
+- 계정마다 화면 열쇠를 그 계정 비밀번호로 잠가 `gg_keys`에 저장(비밀번호 자체는 저장하지 않음). 총괄 관리자 계정은 빌드에 내장.
 
 ## 저장 (Supabase)
 
 - 가드너 기록은 Supabase `gg_records`(pending → approved), 추가한 자리·식물은 `gg_options`에 저장돼요.
 - 접근은 요청 헤더 `x-gg-token`이 맞을 때만 허용(RLS). 토큰·주소·공개키는 `src/secrets.json`(저장소 제외)에 있고 빌드 때 암호화된 앱 안에만 들어가요.
-- 테이블 생성: `supabase/schema.sql`(틀) → 빌드가 토큰을 채운 `src/schema.filled.sql`을 SQL Editor에서 실행.
+- 사진은 Storage 버킷 `gg-photos`(추측 불가 파일명, 목록 차단, 업로드는 토큰 필요).
+- SQL: `supabase/schema.sql` · `storage.sql` · `accounts.sql`(틀) → 빌드가 토큰을 채운 `src/*.filled.sql`을 SQL Editor에서 실행.
 - 인터넷이 약하면 기록을 기기에 보관했다가 다음에 열 때 자동으로 보내요.

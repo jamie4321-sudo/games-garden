@@ -1,25 +1,35 @@
 // 게임즈 가든 빌드: src/app.html + src/photos → index.html
-// 사진·데이터·스크립트·폰트는 비밀번호로 암호화(AES-GCM, PBKDF2)해서 넣는다. 공개 저장소에서도 비밀번호 없이는 내용을 볼 수 없다.
-// 사용법: GG_PASSWORD=비밀번호 node build.mjs  (Supabase 주소·공개키·토큰은 src/secrets.json, 저장소 제외)
+// 화면(스크립트·사진·데이터·폰트)은 '화면 열쇠'(src/secrets.json 의 appKey, 고정)로 암호화한다.
+// 계정마다 화면 열쇠를 그 계정 비밀번호로 잠근 값을 Supabase gg_keys 에 두고, 기본 리더 계정 하나는 이 페이지에 내장한다.
+// 사용법: GG_PASSWORD=총괄관리자비밀번호 node build.mjs   (총괄 관리자 이메일·이름은 src/secrets.json 의 masterId·masterName)
 import fs from 'fs';
 import { webcrypto as crypto } from 'crypto';
 
 const PASSWORD = process.env.GG_PASSWORD;
-if (!PASSWORD) { console.error('GG_PASSWORD 환경변수로 비밀번호를 넣어 주세요.'); process.exit(1); }
+if (!PASSWORD) { console.error('GG_PASSWORD 환경변수로 기본 리더 계정 비밀번호를 넣어 주세요.'); process.exit(1); }
+
 const FONT_DIR = process.env.GG_FONT_DIR || 'C:/Users/linkagelab/AppData/Local/Microsoft/Windows/Fonts/';
 const ITER = 310000;
+const b64 = u => Buffer.from(u).toString('base64');
+const enc = new TextEncoder();
 
+// ── 비밀 설정 (저장소 제외) ──
+let SEC = {}; try { SEC = JSON.parse(fs.readFileSync('src/secrets.json', 'utf8')); } catch {}
+if (!SEC.appKey) { SEC.appKey = b64(crypto.getRandomValues(new Uint8Array(32))); fs.writeFileSync('src/secrets.json', JSON.stringify(SEC, null, 2)); console.log('화면 열쇠를 새로 만들었어요 (src/secrets.json)'); }
+const MASTER_ID = (process.env.GG_MASTER_ID || SEC.masterId || 'jamie').trim().toLowerCase(); // 총괄 관리자 로그인 이메일(로그인 창에 jamie 만 써도 됨)
+const MASTER_NAME = process.env.GG_MASTER_NAME || SEC.masterName || '총괄 관리자';
+const SB_URL = (process.env.GG_SB_URL || SEC.sbUrl || '').replace(/\/+$/, ''), SB_KEY = process.env.GG_SB_KEY || SEC.sbKey || '', SB_TOKEN = process.env.GG_SB_TOKEN || SEC.sbToken || '';
+if (SB_TOKEN) for (const n of ['schema', 'storage', 'accounts'])
+  fs.writeFileSync(`src/${n}.filled.sql`, fs.readFileSync(`supabase/${n}.sql`, 'utf8').replaceAll('__GG_TOKEN__', SB_TOKEN));
+
+// ── 앱 조립 ──
 let html = fs.readFileSync('src/app.html', 'utf8');
 const photos = fs.readdirSync('src/photos').filter(f => f.endsWith('.jpg'))
   .map(f => `${f.slice(0, -4)}:"data:image/jpeg;base64,${fs.readFileSync('src/photos/' + f).toString('base64')}"`).join(',');
-html = html.replace('/*__IMGS__*/', photos).replace('/*__FONTS__*/', '');
-let SEC = {}; try { SEC = JSON.parse(fs.readFileSync('src/secrets.json', 'utf8')); } catch {}
-const SB_URL = process.env.GG_SB_URL || SEC.sbUrl || '', SB_KEY = process.env.GG_SB_KEY || SEC.sbKey || '', SB_TOKEN = process.env.GG_SB_TOKEN || SEC.sbToken || '';
-if (SB_TOKEN) fs.writeFileSync('src/schema.filled.sql', fs.readFileSync('supabase/schema.sql', 'utf8').replaceAll('__GG_TOKEN__', SB_TOKEN));
-html = html.replace('/*__SB_URL__*/', SB_URL.replace(/\/+$/, '')).replace('/*__SB_KEY__*/', SB_KEY).replace('/*__SB_TOKEN__*/', SB_TOKEN);
+html = html.replace('/*__IMGS__*/', photos).replace('/*__FONTS__*/', '')
+  .replace('/*__SB_URL__*/', SB_URL).replace('/*__SB_KEY__*/', SB_KEY).replace('/*__SB_TOKEN__*/', SB_TOKEN);
 console.log(SB_URL && SB_KEY ? 'Supabase 연결: ' + SB_URL : 'Supabase 미설정 — 기록은 각 기기에만 저장돼요');
 
-// 앱 스크립트를 떼어내 암호화 대상에 넣는다
 const s = html.indexOf('<script>'), e = html.indexOf('</script>', s);
 const js = html.slice(s + 8, e);
 html = html.slice(0, s) + html.slice(e + 9);
@@ -29,24 +39,32 @@ const font = (f, w) => `@font-face{font-family:"Kakao Big Sans";font-weight:${w}
 try { css = [font('KAKAOBIGSANS-REGULAR.TTF', 400), font('KAKAOBIGSANS-BOLD.TTF', 700), font('KAKAOBIGSANS-EXTRABOLD.TTF', '800 900')].join('\n'); }
 catch { console.warn('Kakao Big Sans를 찾지 못해 기본 서체로 빌드해요.'); }
 
-const enc = new TextEncoder();
-const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-const base = await crypto.subtle.importKey('raw', enc.encode(PASSWORD), 'PBKDF2', false, ['deriveKey']);
-const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: ITER, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
-const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify({ css, js }))));
-const b64 = u => Buffer.from(u).toString('base64');
+// ── 암호화 ──
+const seal = async (key, data) => { const iv = crypto.getRandomValues(new Uint8Array(12)); return { iv: b64(iv), ct: b64(new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(data)))) }; };
+const appKey = await crypto.subtle.importKey('raw', Buffer.from(SEC.appKey, 'base64'), 'AES-GCM', false, ['encrypt']);
+const payload = await seal(appKey, JSON.stringify({ css, js }));
+
+// 기본 리더 계정 칸 (Supabase 에 같은 아이디 칸이 생기면 그쪽이 우선)
+const idh = Buffer.from(await crypto.subtle.digest('SHA-256', enc.encode('gg:' + MASTER_ID))).toString('hex');
+const salt = crypto.getRandomValues(new Uint8Array(16));
+const pwBase = await crypto.subtle.importKey('raw', enc.encode(PASSWORD), 'PBKDF2', false, ['deriveKey']);
+const pwKey = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: ITER, hash: 'SHA-256' }, pwBase, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+const blob = await seal(pwKey, JSON.stringify({ k: SEC.appKey, id: MASTER_ID, name: MASTER_NAME, role: 'leader' }));
+const master = { idh, salt: b64(salt), iter: ITER, iv: blob.iv, blob: blob.ct }; // 이메일·이름은 넣지 않는다(공개 페이지)
 
 const titleEnd = html.indexOf('</title>') + 8;
 const head = html.slice(0, titleEnd), rest = html.slice(titleEnd);
 const gate = `
 <div class="gate" id="gate">
-  <form class="gate-card" id="gate-form" autocomplete="off">
+  <form class="gate-card" id="gate-form" autocomplete="on">
     <b class="gate-brand">GAMES GARDEN</b>
     <span class="gate-sub">카카오게임즈 식물 교체 기록 · 링키지랩</span>
+    <label for="gate-id">이메일</label>
+    <input id="gate-id" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="name@company.com" required>
     <label for="gate-pw">비밀번호</label>
-    <input id="gate-pw" type="password" inputmode="text" autocomplete="current-password" required>
-    <label class="gate-keep"><input type="checkbox" id="gate-keep"> 이 기기에서 기억하기</label>
-    <button type="submit" id="gate-btn">들어가기</button>
+    <input id="gate-pw" type="password" autocomplete="current-password" required>
+    <label class="gate-keep"><input type="checkbox" id="gate-keep"> 이 기기에서 로그인 유지</label>
+    <button type="submit" id="gate-btn">로그인</button>
     <p class="gate-err" id="gate-err" role="alert"></p>
   </form>
 </div>
@@ -57,8 +75,8 @@ body.locked .app,body.locked .scrim{display:none}
 .gate-brand{font-size:18px;font-weight:800;letter-spacing:.3px}
 .gate-sub{font-size:12.5px;color:var(--ink-3);margin-bottom:10px}
 .gate-card label{font-size:13px;font-weight:700;color:var(--ink-2)}
-.gate-card input[type=password]{min-height:52px;border-radius:12px;border:2px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;font-size:18px;padding:0 14px}
-.gate-card input[type=password]:focus{outline:none;border-color:var(--accent-text)}
+.gate-card input[type=password],.gate-card input[type=text]{min-height:52px;border-radius:12px;border:2px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;font-size:18px;padding:0 14px}
+.gate-card input:focus{outline:none;border-color:var(--accent-text)}
 .gate-keep{display:flex;align-items:center;gap:8px;font-weight:400!important}
 .gate-keep input{width:18px;height:18px}
 .gate-card button{min-height:52px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font:inherit;font-size:16px;font-weight:800;cursor:pointer}
@@ -67,38 +85,57 @@ body.locked .app,body.locked .scrim{display:none}
 </style>
 <script>
 (()=>{
-const D={salt:"${b64(salt)}",iv:"${b64(iv)}",it:${ITER},ct:"${b64(ct)}"};
+const D={iv:"${payload.iv}",ct:"${payload.ct}"};
+const M=${JSON.stringify(master)};
+const SB={url:"${SB_URL}",key:"${SB_KEY}"};
+const S="gg-session";
 const u8=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-const K="gg-key";
-async function derive(pw){ const b=await crypto.subtle.importKey("raw",new TextEncoder().encode(pw),"PBKDF2",false,["deriveKey"]);
-  return crypto.subtle.deriveKey({name:"PBKDF2",salt:u8(D.salt),iterations:D.it,hash:"SHA-256"},b,{name:"AES-GCM",length:256},true,["decrypt"]); }
-async function open(key){
-  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:u8(D.iv)},key,u8(D.ct));
-  const {css,js}=JSON.parse(new TextDecoder().decode(pt));
+const hex=async s=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,"0")).join("");
+async function slotFor(idh){
+  if(SB.url){ try{ const r=await fetch(SB.url+"/rest/v1/gg_keys?select=idh,salt,iter,iv,blob&idh=eq."+idh,{headers:{apikey:SB.key}}); if(r.ok){ const a=await r.json(); if(a.length) return a[0]; } }catch(e){} }
+  return idh===M.idh ? M : null;
+}
+async function unlock(slot,pw){
+  const b=await crypto.subtle.importKey("raw",new TextEncoder().encode(pw),"PBKDF2",false,["deriveKey"]);
+  const k=await crypto.subtle.deriveKey({name:"PBKDF2",salt:u8(slot.salt),iterations:slot.iter,hash:"SHA-256"},b,{name:"AES-GCM",length:256},false,["decrypt"]);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:u8(slot.iv)},k,u8(slot.blob))));
+}
+async function open(sess){
+  const k=await crypto.subtle.importKey("raw",u8(sess.k),"AES-GCM",false,["decrypt"]);
+  const {css,js}=JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:u8(D.iv)},k,u8(D.ct))));
+  window.GG_USER={id:sess.id,name:sess.name,role:sess.role,idh:sess.idh};
+  window.GG_KRAW=sess.k; window.GG_MASTER={idh:M.idh};
   const st=document.createElement("style"); st.textContent=css; document.head.appendChild(st);
   document.body.classList.remove("locked"); document.getElementById("gate").remove();
   const sc=document.createElement("script"); sc.textContent=js; document.body.appendChild(sc);
 }
 document.body.classList.add("locked");
-(async()=>{ try{ const raw=localStorage.getItem(K); if(raw){ const key=await crypto.subtle.importKey("jwk",JSON.parse(raw),{name:"AES-GCM"},false,["decrypt"]); await open(key); return; } }catch(e){ try{localStorage.removeItem(K)}catch(_){} }
-  document.getElementById("gate-pw").focus(); })();
+(async()=>{ try{ const raw=localStorage.getItem(S); if(raw){ await open(JSON.parse(raw)); return; } }catch(e){ try{localStorage.removeItem(S)}catch(_){} }
+  document.getElementById("gate-id").focus(); })();
 document.getElementById("gate-form").addEventListener("submit",async ev=>{
   ev.preventDefault(); const btn=document.getElementById("gate-btn"), err=document.getElementById("gate-err");
-  btn.disabled=true; btn.textContent="여는 중…"; err.textContent="";
-  try{ const key=await derive(document.getElementById("gate-pw").value);
-    if(document.getElementById("gate-keep").checked){ try{ localStorage.setItem(K,JSON.stringify(await crypto.subtle.exportKey("jwk",key))); }catch(e){} }
-    await open(key);
-  }catch(e){ err.textContent="비밀번호가 맞지 않아요. 다시 입력해 주세요."; btn.disabled=false; btn.textContent="들어가기"; }
+  const id=document.getElementById("gate-id").value.trim().toLowerCase(), pw=document.getElementById("gate-pw").value;
+  btn.disabled=true; btn.textContent="확인하는 중…"; err.textContent="";
+  try{
+    const idh=id==="jamie" ? M.idh : await hex("gg:"+id), slot=await slotFor(idh);
+    if(!slot) throw new Error("no");
+    const x=await unlock(slot,pw);
+    const sess={k:x.k,id:x.id,name:x.name,role:x.role,idh};
+    if(document.getElementById("gate-keep").checked){ try{ localStorage.setItem(S,JSON.stringify(sess)); }catch(e){} }
+    await open(sess);
+  }catch(e){ err.textContent="이메일 또는 비밀번호가 맞지 않아요."; btn.disabled=false; btn.textContent="로그인"; }
 });
 })();
 </script>`;
 
+const favicon = `<link rel="icon" href="data:image/svg+xml,${encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🌱</text></svg>")}">`;
 const out = `<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
+${favicon}
 ${head}
 </head>
 <body>
@@ -108,4 +145,4 @@ ${gate}
 </html>
 `;
 fs.writeFileSync('index.html', out);
-console.log(`index.html ${(out.length / 1e6).toFixed(2)}MB · 사진 ${photos.split('data:image').length - 1}장`);
+console.log(`index.html ${(out.length / 1e6).toFixed(2)}MB · 사진 ${photos.split('data:image').length - 1}장 · 기본 리더 계정: ${MASTER_ID}`);
