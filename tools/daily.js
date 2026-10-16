@@ -3,6 +3,7 @@
 // 저장: gg_records data.t = "daily"(구역 관리 기록) · "cmt"(코멘트 한 줄 = 한 건, 동시에 써도 덮어쓰지 않게)
 // 사진은 크게 보기 1280px + 목록용 400px 를 따로 올린다. 하나라도 못 올리면 기록을 보내지 않고 이 기기(IndexedDB)에 보관했다가 다시 보낸다
 const D_MAX = 10;                                   // 기록 한 건당 사진
+const D_MEMO = 600;                                 // 메모 글자 수 (줄바꿈 · 문단 그대로 저장)
 const D_CAN = USER.role !== "client";               // 데일리 기록 · 코멘트 쓰기: 리더 · 가드너
 const D_WD = ["일","월","화","수","목","금","토"];
 const dEsc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -270,8 +271,23 @@ async function dCmtEdit(rid){ const c=CMTS.find(y=>y.rid===rid); if(!c) return; 
   try{ await dPatch(c, {text:t}); dailyRender(); toast("코멘트를 고쳤어요"); }catch(e){ console.warn(e); toast("고치지 못했어요. 인터넷 연결을 확인해 주세요."); } }
 async function dCmtDel(rid){ const c=CMTS.find(y=>y.rid===rid); if(!c || !confirm("이 코멘트를 지울까요?")) return;
   try{ await dPatch(c, {del:true}); dailyRender(); toast("코멘트를 지웠어요"); }catch(e){ console.warn(e); toast("지우지 못했어요. 인터넷 연결을 확인해 주세요."); } }
-async function dMemoEdit(rid){ const x=DAILY.find(y=>y.rid===rid); if(!x) return; const v=prompt("메모 수정", x.memo); if(v==null) return;
-  try{ await dPatch(x, {memo:v.trim().slice(0,200)}); dailyRender(); toast("메모를 고쳤어요"); }catch(e){ console.warn(e); toast("고치지 못했어요. 인터넷 연결을 확인해 주세요."); } }
+// 여러 줄 고치기 창 (prompt 는 줄바꿈이 안 돼서)
+function dTextEdit(title, value, max){
+  return new Promise(res=>{
+    const w=document.createElement("div"); w.className="dte"; w.setAttribute("role","dialog"); w.setAttribute("aria-modal","true"); w.setAttribute("aria-label",title);
+    w.innerHTML=`<div class="dte-card"><b>${dEsc(title)}</b><textarea maxlength="${max}" rows="8">${dEsc(value)}</textarea>
+      <div class="dte-f"><span class="num"></span><button type="button" data-no>취소</button><button type="button" data-ok>저장</button></div></div>`;
+    document.body.appendChild(w);
+    const ta=w.querySelector("textarea"), n=w.querySelector(".dte-f span"), done=v=>{ w.remove(); res(v); };
+    const cnt=()=>{ n.textContent=`${ta.value.length} / ${max}`; }; ta.oninput=cnt; cnt();
+    w.querySelector("[data-no]").onclick=()=>done(null); w.querySelector("[data-ok]").onclick=()=>done(ta.value);
+    w.onclick=e=>{ if(e.target===w) done(null); };
+    w.onkeydown=e=>{ if(e.key==="Escape") done(null); };
+    ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
+}
+async function dMemoEdit(rid){ const x=DAILY.find(y=>y.rid===rid); if(!x) return; const v=await dTextEdit("메모 수정", x.memo, D_MEMO); if(v==null) return;
+  try{ await dPatch(x, {memo:v.trim().slice(0,D_MEMO)}); dailyRender(); toast("메모를 고쳤어요"); }catch(e){ console.warn(e); toast("고치지 못했어요. 인터넷 연결을 확인해 주세요."); } }
 async function dRecDel(rid){ const x=DAILY.find(y=>y.rid===rid); if(!x || !confirm(`${zoneLabel(x.loc)} 기록${x.photos.length?`(사진 ${x.photos.length}장)`:""}을 지울까요?`)) return;
   try{ await dPatch(x, {del:true}); dailyRender(); toast("기록을 지웠어요"); }catch(e){ console.warn(e); toast("지우지 못했어요. 인터넷 연결을 확인해 주세요."); } }
 
@@ -317,7 +333,7 @@ function dFlowRender(){
       ${L.length||DF.reading?"":`<button class="ghost" type="button" id="df-nophoto">사진 없어요</button>`}`;
   } else if(k==="memo"){
     body=`<h2>한 줄 메모를 남겨요</h2><p class="hint">없으면 비워 두고 다음을 눌러요.</p>
-      <textarea class="bigin" id="df-memo" rows="3" maxlength="200" style="padding:14px;min-height:120px" placeholder="예: 잎 먼지 정리, 몬스테라 지지대 보강">${dEsc(DF.memo)}</textarea>
+      <textarea class="bigin" id="df-memo" rows="5" maxlength="${D_MEMO}" style="padding:14px;min-height:160px;line-height:1.55" placeholder="예: 잎 먼지 정리, 몬스테라 지지대 보강">${dEsc(DF.memo)}</textarea>
       <button class="primary" type="button" id="df-next">다음</button>`;
   } else if(k==="check"){
     body=`<h2>이대로 보낼까요?</h2>
