@@ -9,6 +9,8 @@ const dEsc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").repla
 const dYmd = s => ymdOf(new Date(s));
 const dAdd = (ymd, n) => { const [y,m,d]=ymd.split("-").map(Number); return ymdOf(new Date(y,m-1,d+n)); };
 const dDate = ymd => { const [y,m,d]=ymd.split("-").map(Number); return new Date(y,m-1,d); };
+// 데일리 현황은 평일(월~금)만 보여 준다. 토·일이면 그 주 금요일로
+const dWeekday = ymd => { const w=dDate(ymd).getDay(); return w===6?dAdd(ymd,-1):w===0?dAdd(ymd,-2):ymd; };
 const dMonday = ymd => { const w=dDate(ymd).getDay(); return dAdd(ymd, w===0?-6:1-w); };
 const dHM = iso => { const t=new Date(iso); return `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`; };
 const dLong = ymd => { const t=dDate(ymd); return `${t.getMonth()+1}월 ${t.getDate()}일 ${D_WD[t.getDay()]}요일`; };
@@ -20,10 +22,15 @@ const dZone = (floor, zone) => floor==="전체" ? D_ALL : floor==="기타" ? zon
 const dPh = p => typeof p==="string" ? {u:p, th:p} : (p||{});
 
 function dailyFromRec(r){ const d=r.data||{}; return {rid:r.id, raw:d, date:d.date||dYmd(r.created_at), at:d.at||r.created_at, loc:d.loc||"", memo:d.memo||"", photos:(d.photos||[]).map(dPh).filter(p=>p.u), by:d.by||"", byRole:d.byRole||"", del:!!d.del, editedAt:d.editedAt||""}; }
+function heartFromRec(r){ const d=r.data||{}; return {rid:r.id, raw:d, ref:d.ref, idh:d.idh||"", by:d.by||"", at:d.at||r.created_at, del:!!d.del, editedAt:d.editedAt||""}; }
 function cmtFromRec(r){ const d=r.data||{}; return {rid:r.id, raw:d, ref:d.ref, text:d.text||"", by:d.by||"", byRole:d.byRole||"", at:d.at||r.created_at, del:!!d.del, editedAt:d.editedAt||""}; }
 // 이 기기에서 아직 못 보낸 기록도 '전송 대기'로 함께 보여준다
 const dPend = t => dPending.filter(r=>r.data?.t===t).map(r=>({...(t==="cmt"?cmtFromRec(r):dailyFromRec(r)), pend:true}));
 const dLive = () => [...DAILY, ...dPend("daily").filter(p=>!DAILY.some(x=>x.rid===p.rid))].filter(x=>!x.del);
+// 하트: 한 사람이 기록 하나에 1개(id 고정) · 다시 누르면 del 로 끈다
+const D_ME = USER.idh || USER.id || USER.name || "local";
+const hOf = rid => HEARTS.filter(h=>h.ref===rid && !h.del);
+const H_IC = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.3-9.4C1.4 7.6 3.9 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.3 0 5.8 3.1 4.5 6.6-1.8 4.8-9.3 9.4-9.3 9.4z"/></svg>`;
 const cOf = rid => [...CMTS, ...dPend("cmt").filter(p=>!CMTS.some(c=>c.rid===p.rid))].filter(c=>c.ref===rid && !c.del).sort((a,b)=>new Date(a.at)-new Date(b.at));
 
 /* ── 사진: 줄이기(크게 보기 · 목록용) ── */
@@ -99,6 +106,7 @@ async function dFlush(){
   } finally { dFlushing = false; }
 }
 function dUpsertLocal(rec){
+  if(rec.data.t==="heart"){ const x=heartFromRec(rec), i=HEARTS.findIndex(y=>y.rid===rec.id); if(i<0) HEARTS.push(x); else HEARTS[i]=x; return; }
   const list = rec.data.t==="cmt" ? CMTS : DAILY, x = rec.data.t==="cmt" ? cmtFromRec(rec) : dailyFromRec(rec);
   const i = list.findIndex(y=>y.rid===rec.id); if(i<0) list.push(x); else list[i]=x;
 }
@@ -132,18 +140,19 @@ const DS = { day: todayYmd(), cal: false, calY: new Date().getFullYear(), calM: 
 function dailyView(){ dailyRender(); dPendingLoad(); }
 function dailyRender(){
   const box=$("#daily"); if(!box) return;
-  const day=DS.day, mon=dMonday(day), today=todayYmd();
-  const week=[...Array(7)].map((_,k)=>dAdd(mon,k));
+  DS.day=dWeekday(DS.day);
+  const day=DS.day, mon=dMonday(day), today=dWeekday(todayYmd()), realToday=todayYmd();
+  const week=[...Array(5)].map((_,k)=>dAdd(mon,k));
   const cell = (v, small) => { const c=dCounts(v), t=dDate(v);
     const sub = c.ph ? `사진 ${c.ph}` : c.ag ? (v>today?`예정 ${c.ag}`:`일정 ${c.ag}`) : "";
-    return `<button type="button" class="dw-d${v===day?" on":""}${v===today?" today":""}${t.getDay()===0||t.getDay()===6?" we":""}" data-day="${v}" aria-pressed="${v===day}" aria-label="${dLong(v)}${c.ph?` 사진 ${c.ph}장`:""}">
+    return `<button type="button" class="dw-d${v===day?" on":""}${v===realToday?" today":""}" data-day="${v}" aria-pressed="${v===day}" aria-label="${dLong(v)}${c.ph?` 사진 ${c.ph}장`:""}">
       ${small?"":`<span class="dw-w">${D_WD[t.getDay()]}</span>`}<b class="num">${t.getDate()}</b>${small?(c.ph||c.ag?`<i class="dw-dot${c.ph?" ph":""}"></i>`:""):`<span class="dw-s">${sub||"&nbsp;"}</span>${c.cm?`<span class="dw-c">코멘트 ${c.cm}</span>`:""}`}</button>`; };
   let cal="";
   if(DS.cal){
-    const y=DS.calY, m=DS.calM, first=(new Date(y,m,1).getDay()+6)%7, last=new Date(y,m+1,0).getDate();
-    let cells=""; for(let i=0;i<first;i++) cells+="<i></i>"; for(let d=1; d<=last; d++) cells+=cell(ymdOf(new Date(y,m,d)), true);
+    const y=DS.calY, m=DS.calM, f0=(new Date(y,m,1).getDay()+6)%7, first=f0<5?f0:0, last=new Date(y,m+1,0).getDate();
+    let cells=""; for(let i=0;i<first;i++) cells+="<i></i>"; for(let d=1; d<=last; d++){ const w=new Date(y,m,d).getDay(); if(w&&w<6) cells+=cell(ymdOf(new Date(y,m,d)), true); }
     cal = `<div class="dcal"><div class="dcal-h"><button type="button" data-dcm="-1" aria-label="이전 달">${IC.back}</button><b>${y}년 ${m+1}월</b><button type="button" data-dcm="1" class="cal-next" aria-label="다음 달">${IC.back}</button></div>
-      <div class="dcal-w">${["월","화","수","목","금","토","일"].map(w=>`<span>${w}</span>`).join("")}</div><div class="dcal-g">${cells}</div>
+      <div class="dcal-w">${["월","화","수","목","금"].map(w=>`<span>${w}</span>`).join("")}</div><div class="dcal-g">${cells}</div>
       <p class="dcal-lg"><i class="dw-dot ph"></i>사진 있음 <i class="dw-dot"></i>일정만</p></div>`;
   }
   const recs=dDayRecs(day), ag=dAgenda(day), c=dCounts(day);
@@ -151,7 +160,7 @@ function dailyRender(){
   const tl = [...recs.map(x=>({at:x.at, html:`<li class="ag ag--rec"><span class="ag-t num">${dHM(x.at)}</span><button type="button" class="ag-b" data-jump="${dEsc(x.rid)}"><b>${dEsc(zoneLabel(x.loc))} 관리</b><small>${x.by?dEsc(x.by)+" · ":""}${x.photos.length?`사진 ${x.photos.length}장`:"사진 없음"}</small></button>${x.pend?'<span class="st st--wait">전송 대기</span>':'<span class="st st--done">완료</span>'}</li>`})),
     ...ag.map((a,j)=>({at:"", html:`<li class="ag ag--${a.k}"><span class="ag-t">자동</span><button type="button" class="ag-b" data-ag="${j}"><b>${dEsc(a.t)}</b><small>${dEsc(a.s)}</small></button><span class="st ${a.st==="완료"||a.st==="해결"||a.st==="처리 완료"?"st--done":a.st==="지남"?"st--late":"st--open"}">${dEsc(a.st)}</span></li>`}))];
   box.innerHTML = `
-    <div class="d-bar"><div class="d-title"><b>${dLong(day)}${day===today?' <em>오늘</em>':""}</b><span>${recs.length?`관리 ${recs.length}곳 · 사진 ${c.ph}장${c.cm?` · 코멘트 ${c.cm}개`:""}${people.length?` · ${people.map(dEsc).join(", ")}`:""}`:"아직 관리 기록이 없어요"}</span></div>
+    <div class="d-bar"><div class="d-title"><b>${dLong(day)}${day===realToday?' <em>오늘</em>':""}</b><span>${recs.length?`관리 ${recs.length}곳 · 사진 ${c.ph}장${c.cm?` · 코멘트 ${c.cm}개`:""}${people.length?` · ${people.map(dEsc).join(", ")}`:""}`:"아직 관리 기록이 없어요"}</span></div>
       <div class="d-ctl"><button type="button" class="d-nav" data-wk="-7" aria-label="이전 주">${IC.back}</button><button type="button" class="d-today" id="d-today" ${day===today?"disabled":""}>오늘</button><button type="button" class="d-nav nx" data-wk="7" aria-label="다음 주">${IC.back}</button>
       <button type="button" class="d-cal${DS.cal?" on":""}" id="d-cal" aria-pressed="${DS.cal}"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>월 달력</button></div></div>
     <div class="dw">${week.map(v=>cell(v,false)).join("")}</div>
@@ -172,6 +181,7 @@ function dailyRender(){
   box.querySelectorAll("[data-jump]").forEach(b=>b.onclick=()=>{ const g=box.querySelector(`[data-g="${CSS.escape(b.dataset.jump)}"]`); if(g){ g.scrollIntoView({behavior:"smooth", block:"start"}); g.classList.remove("flash"); void g.offsetWidth; g.classList.add("flash"); } });
   const ae=$("#d-add-empty"); if(ae) ae.onclick=()=>dFlowOpen(DS.day);
   box.querySelectorAll("[data-ph]").forEach(b=>b.onclick=()=>{ const [rid,j]=b.dataset.ph.split("|"); dLightbox(rid, +j); });
+  box.querySelectorAll("[data-heart]").forEach(b=>b.onclick=()=>dHeartToggle(b.dataset.heart));
   box.querySelectorAll("[data-cm-toggle]").forEach(b=>b.onclick=()=>{ DS.open[b.dataset.cmToggle]=!DS.open[b.dataset.cmToggle]; dailyRender(); });
   box.querySelectorAll(".cm-form").forEach(f=>f.onsubmit=e=>{ e.preventDefault(); dCmtAdd(f.dataset.ref, f.querySelector("input"), f.querySelector("button")); });
   box.querySelectorAll("[data-cm-edit]").forEach(b=>b.onclick=()=>dCmtEdit(b.dataset.cmEdit));
@@ -188,6 +198,7 @@ function dGroup(x){
       ${dMine(x)&&D_CAN&&!x.pend?`<div class="dg-act"><button type="button" data-memo-edit="${dEsc(x.rid)}">메모 수정</button><button type="button" data-rec-del="${dEsc(x.rid)}">지우기</button></div>`:""}</header>
     ${n?`<div class="dg-ph dg-ph${Math.min(n,5)}">${show.map((p,j)=>`<button type="button" class="dg-i" data-ph="${dEsc(x.rid)}|${j}" aria-label="${dEsc(zoneLabel(x.loc))} 사진 ${j+1} 크게 보기"><img src="${dEsc(p.th||p.u)}" alt="" loading="lazy" decoding="async">${n>5&&j===4?`<b class="cg-more">+${n-5}</b>`:""}</button>`).join("")}</div>`:""}
     ${x.memo?`<p class="dg-memo">${dEsc(x.memo)}</p>`:""}
+    ${x.pend?"":dHeart(x)}
     <div class="cm">
       ${cms.length>2?`<button type="button" class="cm-more" data-cm-toggle="${dEsc(x.rid)}">${open?"코멘트 접기":`코멘트 ${cms.length}개 모두 보기`}</button>`:""}
       ${list.map(c=>`<div class="cm-r"><p><b>${dEsc(c.by||"가드너")}</b><span>${dEsc(c.text)}</span></p><small class="num">${dHM(c.at)}${c.editedAt?" · 수정됨":""}${c.pend?" · 전송 대기":""}${dMine(c)&&D_CAN&&!c.pend?` · <button type="button" data-cm-edit="${dEsc(c.rid)}">수정</button> · <button type="button" data-cm-del="${dEsc(c.rid)}">지우기</button>`:""}</small></div>`).join("")}
@@ -195,6 +206,22 @@ function dGroup(x){
     </div>
   </article>`;
 }
+
+function dHeart(x){
+  const hs=hOf(x.rid), on=hs.some(h=>h.idh===D_ME), n=hs.length, who=hs.map(h=>h.by).filter(Boolean);
+  return `<div class="hrt-row"><button type="button" class="hrt${on?" on":""}" data-heart="${dEsc(x.rid)}" aria-pressed="${on}" aria-label="하트 ${on?"취소":"누르기"} · ${n}개"${who.length?` title="${dEsc(who.join(", "))}"`:""}>${H_IC}<span class="num">${n}</span></button></div>`;
+}
+async function dHeartToggle(rid){
+  const id=`h-${rid}-${String(D_ME).slice(0,16)}`, cur=HEARTS.find(h=>h.rid===id), on=!(cur && !cur.del);
+  const rec={id, status:"pending", data:{t:"heart", ref:rid, idh:D_ME, by:USER.name||"", byRole:USER.role, at:cur?.at||new Date().toISOString(), del:!on, ...(cur?{editedAt:new Date().toISOString()}:{})}};
+  const prev=cur?{...cur}:null; dUpsertLocal(rec); dHeartPaint(rid, on);
+  if(!SB_ON) return;
+  try{ await sb("gg_records", {method:"POST", headers:{Prefer:"resolution=merge-duplicates,return=minimal"}, body:JSON.stringify(rec)}); }
+  catch(e){ console.warn(e); const i=HEARTS.findIndex(h=>h.rid===id); if(prev) HEARTS[i]=prev; else if(i>=0) HEARTS.splice(i,1); dHeartPaint(rid); toast("하트를 저장하지 못했어요. 인터넷 연결을 확인해 주세요."); }
+}
+// 하트만 다시 그린다(사진·코멘트 칸은 그대로)
+function dHeartPaint(rid, pop){ const g=$(`#daily [data-g="${CSS.escape(rid)}"]`), x=dLive().find(y=>y.rid===rid); if(!g||!x) return;
+  const old=g.querySelector(".hrt-row"); if(!old) return; old.outerHTML=dHeart(x); const b=g.querySelector(".hrt"); b.onclick=()=>dHeartToggle(rid); if(pop) b.classList.add("pop"); }
 
 /* ── 사진 크게 보기: 좌우 넘기기 ── */
 let DLB = null;
@@ -346,11 +373,11 @@ addEventListener("beforeunload", e=>{ if(DF && DF.busy){ e.preventDefault(); e.r
 /* ── 새로 올라온 기록 · 코멘트: 데일리 화면을 보고 있으면 1분마다 확인 ── */
 async function dPoll(){
   if(!SB_ON || state.view!=="daily" || document.hidden) return;
-  let rows; try{ rows = await sb("gg_records?select=id,data,created_at&data->>t=in.(daily,cmt)&order=created_at.asc"); }catch(e){ return; }
+  let rows; try{ rows = await sb("gg_records?select=id,data,created_at&data->>t=in.(daily,cmt,heart)&order=created_at.asc"); }catch(e){ return; }
   if(!Array.isArray(rows)) return;
-  const sig=()=>DAILY.map(x=>x.rid+x.editedAt+x.del).join()+CMTS.map(c=>c.rid+c.editedAt+c.del).join();
-  const before=sig(); DAILY.length=CMTS.length=0;
-  rows.forEach(r=>{ if(r.data?.t==="daily") DAILY.push(dailyFromRec(r)); else CMTS.push(cmtFromRec(r)); });
+  const sig=()=>DAILY.map(x=>x.rid+x.editedAt+x.del).join()+CMTS.map(c=>c.rid+c.editedAt+c.del).join()+HEARTS.map(h=>h.rid+h.del).join();
+  const before=sig(); DAILY.length=CMTS.length=HEARTS.length=0;
+  rows.forEach(r=>{ if(r.data?.t==="daily") DAILY.push(dailyFromRec(r)); else if(r.data?.t==="heart") HEARTS.push(heartFromRec(r)); else CMTS.push(cmtFromRec(r)); });
   if(sig()===before) return;
   // 코멘트를 쓰는 중이면(글자가 있으면) 다시 그리지 않는다. 빈 칸에 커서만 있으면 다시 그리고 커서를 돌려준다
   const fi=document.activeElement?.closest?.(".cm-form"); if(fi && fi.querySelector("input").value.trim()) return;

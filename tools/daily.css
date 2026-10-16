@@ -13,7 +13,7 @@
 .d-ctl svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2.2}
 .d-ctl .nx svg{transform:scaleX(-1)}
 .d-cal.on{border-color:var(--accent-text);background:color-mix(in srgb,var(--accent) 22%,var(--panel))}
-.dw{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.dw{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
 .dw-d{min-height:86px;border:1.5px solid var(--line-soft);background:var(--panel);border-radius:var(--r);font:inherit;color:var(--ink);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:8px 4px;transition:border-color .15s ease,transform .12s ease-out}
 .dw-d:active{transform:scale(.97)}
 .dw-d:hover{border-color:var(--line)}
@@ -30,7 +30,7 @@
 .dcal-h button{width:36px;height:36px;border-radius:10px;border:1.5px solid var(--line);background:var(--panel-2);cursor:pointer;display:grid;place-items:center;color:var(--ink)}
 .dcal-h button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.4}
 .dcal-h .cal-next svg{transform:scaleX(-1)}
-.dcal-w,.dcal-g{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;text-align:center}
+.dcal-w,.dcal-g{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;text-align:center}
 .dcal-w span{font-size:11.5px;color:var(--ink-3);font-weight:700}
 .dcal-g .dw-d{min-height:44px;padding:4px;gap:3px;border-radius:10px}
 .dcal-g .dw-d b{font-size:14px}
@@ -126,3 +126,13 @@
   .dg-ph{--rh:96px}
   .nav button[data-view="report"]{display:none!important}
 }
+/* 하트 */
+.hrt-row{display:flex;margin:-2px 0 -4px}
+.hrt{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px 0 8px;margin-left:-8px;border:0;border-radius:999px;background:transparent;color:var(--ink-3);font:inherit;font-size:13px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.hrt:hover{background:var(--panel-2)}
+.hrt svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round}
+.hrt.on{color:#f04452}
+.hrt.on svg{fill:currentColor}
+.hrt.pop svg{animation:hrt-pop .32s cubic-bezier(.2,.9,.3,1.4)}
+@keyframes hrt-pop{0%{transform:scale(.7)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.hrt.pop svg{animation:none}}
