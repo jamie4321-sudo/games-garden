@@ -13,7 +13,10 @@ const dMonday = ymd => { const w=dDate(ymd).getDay(); return dAdd(ymd, w===0?-6:
 const dHM = iso => { const t=new Date(iso); return `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`; };
 const dLong = ymd => { const t=dDate(ymd); return `${t.getMonth()+1}월 ${t.getDate()}일 ${D_WD[t.getDay()]}요일`; };
 const dUid = p => `${p}-${Date.now().toString(36)}-${(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)).slice(0,8)}`;
-const dZone = (floor, zone) => `${floor==="10층"?"10F":"14F"} ${zone}`;
+// 위치: 10층 · 14층 구역 / 10·14층 전체 / 직접 추가한 위치(gg_options zone "기타|이름" → 모든 기기에 보임)
+const D_ALL = "10·14층 전체";
+const D_PLACES = store.get("gg-dplaces", []);
+const dZone = (floor, zone) => floor==="전체" ? D_ALL : floor==="기타" ? zone : `${floor==="10층"?"10F":"14F"} ${zone}`;
 const dPh = p => typeof p==="string" ? {u:p, th:p} : (p||{});
 
 function dailyFromRec(r){ const d=r.data||{}; return {rid:r.id, raw:d, date:d.date||dYmd(r.created_at), at:d.at||r.created_at, loc:d.loc||"", memo:d.memo||"", photos:(d.photos||[]).map(dPh).filter(p=>p.u), by:d.by||"", byRole:d.byRole||"", del:!!d.del, editedAt:d.editedAt||""}; }
@@ -264,11 +267,20 @@ function dFlowRender(){
     body=`<h2>언제 관리했어요?</h2><div class="big-grid"><button class="bigbtn yes" type="button" data-dday="${day(0).y}">오늘<small>${day(0).l}</small></button><button class="bigbtn" type="button" data-dday="${day(1).y}">어제<small>${day(1).l}</small></button></div>
       <button class="bigbtn date-big ${DF.cal?"yes":""}" type="button" id="df-cal">다른 날짜 고르기<small>${DF.cal?"아래 달력에서 날짜를 눌러요":"달력에서 골라요"}</small></button>
       ${DF.cal?calendarHTML(DF.calY, DF.calM, DF.date):""}`;
+  } else if(DF.sub){
+    const zone=DF.sub==="zone";
+    body=`<h2>${zone?`${DF.floor}에 구역을 추가해요`:"위치를 추가해요"}</h2><p class="hint">${zone?"다음부터 구역 목록에 함께 보여요.":"층·장소 이름을 써요. 다음부터 위치 목록에 함께 보여요."}</p>
+      <input class="bigin" id="df-new" type="text" maxlength="20" placeholder="${zone?"예: D2, 대회의실":"예: 15층 라운지, 1층 로비, 옥상 정원"}" value="${dEsc(DF.draft||"")}" aria-label="${zone?"구역 이름":"위치 이름"}">
+      <button class="primary" type="button" id="df-add" ${(DF.draft||"").trim()?"":"disabled"}>${IC.plus}추가하고 고르기</button>`;
   } else if(k==="floor"){
-    body=`<h2>몇 층이에요?</h2><p class="hint">${dateLabel(DF.date)}</p><div class="big-grid">${Object.keys(ZONES).map(f=>`<button class="bigbtn" type="button" data-df="${f}">${f}</button>`).join("")}</div>`;
+    body=`<h2>어디를 관리했어요?</h2><p class="hint">${dateLabel(DF.date)}</p><div class="big-grid">${Object.keys(ZONES).map(f=>`<button class="bigbtn" type="button" data-df="${f}">${f}</button>`).join("")}
+      <button class="bigbtn" type="button" data-df="전체"><small>모든 층 · 모든 구역</small>${D_ALL}</button>
+      ${D_PLACES.map(p=>`<button class="bigbtn" type="button" data-dp="${dEsc(p)}">${dEsc(p)}</button>`).join("")}
+      <button class="bigbtn add" type="button" data-dadd="place">${IC.plus}<small>기타 · 위치 추가</small></button></div>`;
   } else if(k==="zone"){
     body=`<h2>${DF.floor} 어느 구역이에요?</h2><div class="big-grid three">${ZONES[DF.floor].map(z=>`<button class="bigbtn" type="button" data-dz="${dEsc(z)}">${dEsc(z)}</button>`).join("")}
-      <button class="bigbtn" type="button" data-dz="전체"><small>여러 구역</small>${DF.floor} 전체</button></div>`;
+      <button class="bigbtn" type="button" data-dz="전체"><small>여러 구역</small>${DF.floor} 전체</button>
+      <button class="bigbtn add" type="button" data-dadd="zone">${IC.plus}<small>기타 · 구역 추가</small></button></div>`;
   } else if(k==="photo"){
     const L=DF.photos;
     body=`<h2>사진을 넣어요</h2><p class="hint">${L.length?`${L.length}장 넣었어요 · 최대 ${D_MAX}장`:`관리한 모습을 찍어요 · 최대 ${D_MAX}장`}</p>
@@ -282,19 +294,26 @@ function dFlowRender(){
   } else if(k==="check"){
     body=`<h2>이대로 보낼까요?</h2>
       <div class="recap"><div class="pair" style="grid-template-columns:1fr">${collage(DF.photos.map(p=>p.th),"after","사진","")}</div>
-        <ul><li><span>날짜</span>${dateLabel(DF.date)}</li><li><span>구역</span>${DF.floor} ${dEsc(DF.zone)}</li>${DF.memo?`<li><span>메모</span><em style="font-style:normal;font-weight:400;font-size:17px">${dEsc(DF.memo)}</em></li>`:""}</ul></div>
+        <ul><li><span>날짜</span>${dateLabel(DF.date)}</li><li><span>위치</span>${dEsc(zoneLabel(dZone(DF.floor, DF.zone)))}</li>${DF.memo?`<li><span>메모</span><em style="font-style:normal;font-weight:400;font-size:17px">${dEsc(DF.memo)}</em></li>`:""}</ul></div>
       <button class="primary" type="button" id="df-send" ${DF.busy?"disabled":""}>${DF.busy?dEsc(DF.busyText||"보내는 중…"):`${IC.ok}보내기`}</button>
       ${DF.busy?`<p class="hint center" style="margin:0">다 올라갈 때까지 화면을 닫지 마세요.</p>`:""}`;
   }
   el.innerHTML = top + `<div class="crew-body"><div class="crew-step" aria-live="polite">${body}</div></div>`;
   const go=d=>{ DF.cal=false; DF.step=Math.max(0,Math.min(DF_S.length-1,DF.step+d)); dFlowRender(); };
+  const noZone=()=>DF.floor==="전체"||DF.floor==="기타";   // 구역 단계 없이 바로 사진으로
   $("#f-x").onclick=()=>{ if(DF.photos.length && !DF.done && !confirm("넣은 사진이 지워져요. 닫을까요?")) return; flowClose(); };
-  const bk=$("#f-back"); if(bk) bk.onclick=()=>{ if(DF_S[DF.step]==="memo"){ const m=$("#df-memo"); if(m) DF.memo=m.value.trim(); } go(-1); };
+  const bk=$("#f-back"); if(bk) bk.onclick=()=>{ if(DF.sub){ DF.sub=null; DF.draft=""; dFlowRender(); return; } if(DF_S[DF.step]==="memo"){ const m=$("#df-memo"); if(m) DF.memo=m.value.trim(); } go(DF_S[DF.step]==="photo"&&noZone()?-2:-1); };
+  el.querySelectorAll("[data-dp]").forEach(b=>b.onclick=()=>{ DF.floor="기타"; DF.zone=b.dataset.dp; go(2); });
+  el.querySelectorAll("[data-dadd]").forEach(b=>b.onclick=()=>{ DF.sub=b.dataset.dadd; DF.draft=""; dFlowRender(); });
+  const dn=$("#df-new"); if(dn){ dn.oninput=()=>{ DF.draft=dn.value; $("#df-add").disabled=!dn.value.trim(); }; dn.onkeydown=e=>{ if(e.key==="Enter" && !e.isComposing){ e.preventDefault(); $("#df-add").click(); } }; dn.focus(); }
+  const da=$("#df-add"); if(da) da.onclick=()=>{ const v=(DF.draft||"").trim().replace(/\|/g,"/"); if(!v) return;
+    if(DF.sub==="zone"){ if(!ZONES[DF.floor].includes(v)){ ZONES[DF.floor].push(v); (ZONE_ADD[DF.floor]=ZONE_ADD[DF.floor]||[]).push(v); store.set("gg-zones",ZONE_ADD); saveOpt("zone", `${DF.floor}|${v}`); } toast(`${DF.floor} ${v} 구역을 추가했어요`); DF.zone=v; DF.sub=null; go(1); }
+    else { if(!D_PLACES.includes(v)){ D_PLACES.push(v); store.set("gg-dplaces",D_PLACES); saveOpt("zone", `기타|${v}`); } toast(`${v} 위치를 추가했어요`); DF.floor="기타"; DF.zone=v; DF.sub=null; go(2); } };
   el.querySelectorAll("[data-dday]").forEach(b=>b.onclick=()=>{ DF.date=b.dataset.dday; go(1); });
   const dc=$("#df-cal"); if(dc) dc.onclick=()=>{ DF.cal=!DF.cal; const n=new Date(); DF.calY=n.getFullYear(); DF.calM=n.getMonth(); dFlowRender(); };
   el.querySelectorAll("[data-cm]").forEach(b=>b.onclick=()=>{ DF.calM+=+b.dataset.cm; if(DF.calM<0){DF.calM=11;DF.calY--;} if(DF.calM>11){DF.calM=0;DF.calY++;} dFlowRender(); });
   el.querySelectorAll("[data-cd]").forEach(b=>b.onclick=()=>{ DF.date=b.dataset.cd; go(1); });
-  el.querySelectorAll("[data-df]").forEach(b=>b.onclick=()=>{ DF.floor=b.dataset.df; go(1); });
+  el.querySelectorAll("[data-df]").forEach(b=>b.onclick=()=>{ DF.floor=b.dataset.df; if(DF.floor==="전체"){ DF.zone="전체"; go(2); } else go(1); });
   el.querySelectorAll("[data-dz]").forEach(b=>b.onclick=()=>{ DF.zone=b.dataset.dz; go(1); });
   el.querySelectorAll("[data-drm]").forEach(b=>b.onclick=()=>{ DF.photos.splice(+b.dataset.drm,1); dFlowRender(); });
   el.querySelectorAll(".df-file").forEach(fi=>fi.onchange=async()=>{
