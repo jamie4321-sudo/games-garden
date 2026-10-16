@@ -148,7 +148,7 @@ function dailyRender(){
   }
   const recs=dDayRecs(day), ag=dAgenda(day), c=dCounts(day);
   const people=[...new Set(recs.map(x=>x.by).filter(Boolean))];
-  const tl = [...recs.map(x=>({at:x.at, html:`<li class="ag ag--rec"><span class="ag-t num">${dHM(x.at)}</span><button type="button" class="ag-b" data-jump="${dEsc(x.rid)}"><b>${dEsc(zoneLabel(x.loc))} 관리</b><small>${x.by?dEsc(x.by)+" · ":""}사진 ${x.photos.length}장</small></button>${x.pend?'<span class="st st--wait">전송 대기</span>':'<span class="st st--done">완료</span>'}</li>`})),
+  const tl = [...recs.map(x=>({at:x.at, html:`<li class="ag ag--rec"><span class="ag-t num">${dHM(x.at)}</span><button type="button" class="ag-b" data-jump="${dEsc(x.rid)}"><b>${dEsc(zoneLabel(x.loc))} 관리</b><small>${x.by?dEsc(x.by)+" · ":""}${x.photos.length?`사진 ${x.photos.length}장`:"사진 없음"}</small></button>${x.pend?'<span class="st st--wait">전송 대기</span>':'<span class="st st--done">완료</span>'}</li>`})),
     ...ag.map((a,j)=>({at:"", html:`<li class="ag ag--${a.k}"><span class="ag-t">자동</span><button type="button" class="ag-b" data-ag="${j}"><b>${dEsc(a.t)}</b><small>${dEsc(a.s)}</small></button><span class="st ${a.st==="완료"||a.st==="해결"||a.st==="처리 완료"?"st--done":a.st==="지남"?"st--late":"st--open"}">${dEsc(a.st)}</span></li>`}))];
   box.innerHTML = `
     <div class="d-bar"><div class="d-title"><b>${dLong(day)}${day===today?' <em>오늘</em>':""}</b><span>${recs.length?`관리 ${recs.length}곳 · 사진 ${c.ph}장${c.cm?` · 코멘트 ${c.cm}개`:""}${people.length?` · ${people.map(dEsc).join(", ")}`:""}`:"아직 관리 기록이 없어요"}</span></div>
@@ -184,7 +184,7 @@ function dGroup(x){
   const ps=x.photos, n=ps.length, show=ps.slice(0,5), cms=cOf(x.rid), open=DS.open[x.rid] || cms.length<=2;
   const list = open ? cms : cms.slice(-2);
   return `<article class="dg" data-g="${dEsc(x.rid)}">
-    <header class="dg-h"><div><b>${dEsc(zoneLabel(x.loc))}${x.pend?' <em class="d-wait">전송 대기</em>':""}</b><small><span class="num">${dHM(x.at)}</span>${x.by?` · ${dEsc(x.by)}`:""} · 사진 ${n}장</small></div>
+    <header class="dg-h"><div><b>${dEsc(zoneLabel(x.loc))}${x.pend?' <em class="d-wait">전송 대기</em>':""}</b><small><span class="num">${dHM(x.at)}</span>${x.by?` · ${dEsc(x.by)}`:""} · ${n?`사진 ${n}장`:"사진 없음"}</small></div>
       ${dMine(x)&&D_CAN&&!x.pend?`<div class="dg-act"><button type="button" data-memo-edit="${dEsc(x.rid)}">메모 수정</button><button type="button" data-rec-del="${dEsc(x.rid)}">지우기</button></div>`:""}</header>
     ${n?`<div class="dg-ph dg-ph${Math.min(n,5)}">${show.map((p,j)=>`<button type="button" class="dg-i" data-ph="${dEsc(x.rid)}|${j}" aria-label="${dEsc(zoneLabel(x.loc))} 사진 ${j+1} 크게 보기"><img src="${dEsc(p.th||p.u)}" alt="" loading="lazy" decoding="async">${n>5&&j===4?`<b class="cg-more">+${n-5}</b>`:""}</button>`).join("")}</div>`:""}
     ${x.memo?`<p class="dg-memo">${dEsc(x.memo)}</p>`:""}
@@ -245,7 +245,7 @@ async function dCmtDel(rid){ const c=CMTS.find(y=>y.rid===rid); if(!c || !confir
   try{ await dPatch(c, {del:true}); dailyRender(); toast("코멘트를 지웠어요"); }catch(e){ console.warn(e); toast("지우지 못했어요. 인터넷 연결을 확인해 주세요."); } }
 async function dMemoEdit(rid){ const x=DAILY.find(y=>y.rid===rid); if(!x) return; const v=prompt("메모 수정", x.memo); if(v==null) return;
   try{ await dPatch(x, {memo:v.trim().slice(0,200)}); dailyRender(); toast("메모를 고쳤어요"); }catch(e){ console.warn(e); toast("고치지 못했어요. 인터넷 연결을 확인해 주세요."); } }
-async function dRecDel(rid){ const x=DAILY.find(y=>y.rid===rid); if(!x || !confirm(`${zoneLabel(x.loc)} 기록(사진 ${x.photos.length}장)을 지울까요?`)) return;
+async function dRecDel(rid){ const x=DAILY.find(y=>y.rid===rid); if(!x || !confirm(`${zoneLabel(x.loc)} 기록${x.photos.length?`(사진 ${x.photos.length}장)`:""}을 지울까요?`)) return;
   try{ await dPatch(x, {del:true}); dailyRender(); toast("기록을 지웠어요"); }catch(e){ console.warn(e); toast("지우지 못했어요. 인터넷 연결을 확인해 주세요."); } }
 
 /* ── 가드너: 데일리 기록하기 (날짜 → 층 → 구역 → 사진 → 메모 → 보내기) ── */
@@ -260,7 +260,7 @@ function dFlowRender(){
   let body="";
   if(DF.done){
     body=`<div class="done-mark">${IC.ok}</div><h2 class="center">${DF.sent==="later"?"이 폰에 저장했어요":"기록했어요"}</h2>
-      <p class="hint center" style="margin:0">${DF.sent==="later"?"인터넷 연결이 약해요. 연결되면 자동으로 보내요. 사진은 지우지 마세요.":`사진 ${DF.photos.length}장을 저장했어요. 데일리 관리 현황에 바로 보여요.`}</p>
+      <p class="hint center" style="margin:0">${DF.sent==="later"?"인터넷 연결이 약해요. 연결되면 자동으로 보내요. 사진은 지우지 마세요.":`${DF.photos.length?`사진 ${DF.photos.length}장을 저장했어요`:"사진 없이 저장했어요"}. 데일리 관리 현황에 바로 보여요.`}</p>
       <button class="primary" type="button" id="df-again">다른 구역 기록하기</button><button class="ghost" type="button" id="df-close">닫기</button>`;
   } else if(k==="date"){
     const day=n=>{ const d=new Date(Date.now()-n*864e5); return {y:ymdOf(d), l:`${d.getMonth()+1}월 ${d.getDate()}일`}; };
@@ -286,15 +286,16 @@ function dFlowRender(){
     body=`<h2>사진을 넣어요</h2><p class="hint">${L.length?`${L.length}장 넣었어요 · 최대 ${D_MAX}장`:`관리한 모습을 찍어요 · 최대 ${D_MAX}장`}</p>
       ${L.length?`<div class="shots">${L.map((p,j)=>`<div class="shot-th"><img src="${p.th}" alt="">${j===0?'<span class="cover">대표</span>':''}<button type="button" class="rm" data-drm="${j}" aria-label="${j+1}번째 사진 지우기">×</button></div>`).join("")}</div>`:""}
       ${DF.reading?`<p class="hint center" style="margin:0">사진 준비 중…</p>`:L.length<D_MAX?pickBtns("df-file","사진"):""}
-      <button class="primary" type="button" id="df-next" ${L.length&&!DF.reading?"":"disabled"}>다음</button>`;
+      <button class="primary" type="button" id="df-next" ${L.length&&!DF.reading?"":"disabled"}>다음</button>
+      ${L.length||DF.reading?"":`<button class="ghost" type="button" id="df-nophoto">사진 없어요</button>`}`;
   } else if(k==="memo"){
     body=`<h2>한 줄 메모를 남겨요</h2><p class="hint">없으면 비워 두고 다음을 눌러요.</p>
       <textarea class="bigin" id="df-memo" rows="3" maxlength="200" style="padding:14px;min-height:120px" placeholder="예: 잎 먼지 정리, 몬스테라 지지대 보강">${dEsc(DF.memo)}</textarea>
       <button class="primary" type="button" id="df-next">다음</button>`;
   } else if(k==="check"){
     body=`<h2>이대로 보낼까요?</h2>
-      <div class="recap"><div class="pair" style="grid-template-columns:1fr">${collage(DF.photos.map(p=>p.th),"after","사진","")}</div>
-        <ul><li><span>날짜</span>${dateLabel(DF.date)}</li><li><span>위치</span>${dEsc(zoneLabel(dZone(DF.floor, DF.zone)))}</li>${DF.memo?`<li><span>메모</span><em style="font-style:normal;font-weight:400;font-size:17px">${dEsc(DF.memo)}</em></li>`:""}</ul></div>
+      <div class="recap">${DF.photos.length?`<div class="pair" style="grid-template-columns:1fr">${collage(DF.photos.map(p=>p.th),"after","사진","")}</div>`:""}
+        <ul><li><span>날짜</span>${dateLabel(DF.date)}</li><li><span>위치</span>${dEsc(zoneLabel(dZone(DF.floor, DF.zone)))}</li>${DF.photos.length?"":`<li><span>사진</span>없음</li>`}${DF.memo?`<li><span>메모</span><em style="font-style:normal;font-weight:400;font-size:17px">${dEsc(DF.memo)}</em></li>`:""}</ul></div>
       <button class="primary" type="button" id="df-send" ${DF.busy?"disabled":""}>${DF.busy?dEsc(DF.busyText||"보내는 중…"):`${IC.ok}보내기`}</button>
       ${DF.busy?`<p class="hint center" style="margin:0">다 올라갈 때까지 화면을 닫지 마세요.</p>`:""}`;
   }
@@ -321,6 +322,7 @@ function dFlowRender(){
     DF.reading=true; dFlowRender(); let bad=0;
     for(const f of files){ try{ DF.photos.push(await dShrink(f)); }catch(e){ console.warn(e); bad++; } }
     DF.reading=false; if(bad) toast(`사진 ${bad}장은 열 수 없어서 빼었어요. 다른 사진으로 다시 넣어 주세요.`); dFlowRender(); });
+  const np=$("#df-nophoto"); if(np) np.onclick=()=>go(1);
   const nx=$("#df-next"); if(nx) nx.onclick=()=>{ const m=$("#df-memo"); if(m) DF.memo=m.value.trim(); go(1); };
   const sd=$("#df-send"); if(sd) sd.onclick=async()=>{
     if(DF.busy) return; DF.busy=true; DF.busyText="보내는 중…"; dFlowRender();
